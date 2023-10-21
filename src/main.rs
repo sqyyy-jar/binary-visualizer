@@ -7,16 +7,15 @@ use macroquad::{
 };
 
 pub struct BinaryTable {
-    pub max: u32,
+    pub max: f32,
     pub dots: Box<[[u32; 256]; 256]>,
 }
 
-const IGNORED: [[u8; 2]; 2] = [[0, 0], [255, 255]];
-const MAX_AMPLIFICATION: u32 = 1;
+const MAX_AMPLIFICATION: f32 = 1.0;
 
 impl BinaryTable {
     pub fn parse(bytes: &[u8]) -> Self {
-        let mut max = 0;
+        let mut max = 0.0;
         let mut dots = Box::new([[0u32; 256]; 256]);
         for window in bytes.windows(2) {
             let xb = window[0];
@@ -25,18 +24,21 @@ impl BinaryTable {
             let y = yb as usize;
             let value = dots[y][x].saturating_add(1);
             dots[y][x] = value;
-            if value > max && !(IGNORED.contains(&[xb, yb])) {
-                max = value;
+            if value > 0 {
+                let f = (value as f32).ln();
+                if f > max {
+                    max = f;
+                }
             }
         }
         Self {
-            max: (max / MAX_AMPLIFICATION).max(1),
+            max: (max * MAX_AMPLIFICATION).max(1.0),
             dots,
         }
     }
 }
 
-const SCALE: i32 = 3;
+const SCALE: i32 = 4;
 const SCALEF: f32 = SCALE as f32;
 
 fn config() -> Conf {
@@ -75,16 +77,14 @@ fn draw(table: &BinaryTable) {
     clear_background(BLACK);
     for y in 0..256 {
         for x in 0..256 {
-            let value = (table.dots[y][x] as f32 / table.max as f32).min(1.0);
-            if value != 0.0 {
-                draw_rectangle(
-                    x as f32 * SCALEF,
-                    y as f32 * SCALEF,
-                    SCALEF,
-                    SCALEF,
-                    Color::new(value, value / 5.0, 0.0, 1.0),
-                );
-            }
+            let t = (table.dots[y][x] as f32).ln() / table.max;
+            draw_rectangle(
+                x as f32 * SCALEF,
+                y as f32 * SCALEF,
+                SCALEF,
+                SCALEF,
+                Color::new(0.0, t, 0.0, 1.0),
+            );
         }
     }
 }
