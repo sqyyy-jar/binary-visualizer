@@ -3,6 +3,7 @@ use std::env::args;
 use macroquad::{
     prelude::{Color, BLACK},
     shapes::draw_rectangle,
+    texture::get_screen_data,
     window::{clear_background, next_frame, Conf},
 };
 
@@ -52,22 +53,12 @@ fn config() -> Conf {
 #[macroquad::main(config)]
 async fn main() {
     let path = args().nth(1).expect("Input file");
-    let bytes = std::fs::read(path).expect("Read from input file");
+    let bytes = std::fs::read(&path).expect("Read from input file");
     let table = BinaryTable::parse(&bytes);
-    // draw(&table);
-    // let scr = get_screen_data();
-    // let texture = Texture2D::from_image(&scr);
+    draw(&table);
+    let scr = get_screen_data();
+    scr.export_png(&format!("{path}-out.png"));
     loop {
-        // draw_texture_ex(
-        //     &texture,
-        //     0.0,
-        //     0.0,
-        //     WHITE,
-        //     DrawTextureParams {
-        //         flip_y: true,
-        //         ..Default::default()
-        //     },
-        // );
         draw(&table);
         next_frame().await
     }
