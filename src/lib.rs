@@ -1,8 +1,9 @@
-use std::{ffi::OsStr, fs::DirEntry, os::unix::prelude::OsStrExt, path::PathBuf};
+use std::{ffi::OsStr, fs::DirEntry, os::unix::prelude::OsStrExt};
 
 use anyhow::{Error, Result};
 use candle::{DType, Device, Module, Tensor, D};
 use candle_nn::{loss, ops, Linear, Optimizer, VarBuilder, VarMap};
+use macroquad::rand::ChooseRandom;
 
 pub struct BinaryTable {
     pub max: f32,
@@ -70,20 +71,19 @@ const LEARNING_RATE: f64 = 0.05;
 pub enum FileType {
     Text,
     Binary,
-    Png,
+    Jpeg,
+    Pdf,
     Wav,
-    Ogg,
 }
 
 impl FileType {
-    #[rustfmt::skip]
-    pub fn outputs(self) -> &'static [f32; N_OUTPUT] {
+    pub fn output(self) -> u32 {
         match self {
-            Self::Text =>   &[1.0, 0.0, 0.0, 0.0, 0.0],
-            Self::Binary => &[0.0, 1.0, 0.0, 0.0, 0.0],
-            Self::Png =>    &[0.0, 0.0, 1.0, 0.0, 0.0],
-            Self::Wav =>    &[0.0, 0.0, 0.0, 1.0, 0.0],
-            Self::Ogg =>    &[0.0, 0.0, 0.0, 0.0, 1.0],
+            Self::Text => 0,
+            Self::Binary => 1,
+            Self::Jpeg => 2,
+            Self::Pdf => 3,
+            Self::Wav => 4,
         }
     }
 
@@ -96,9 +96,9 @@ impl FileType {
         match max {
             0 => Some(Self::Text),
             1 => Some(Self::Binary),
-            2 => Some(Self::Png),
-            3 => Some(Self::Wav),
-            4 => Some(Self::Ogg),
+            2 => Some(Self::Jpeg),
+            3 => Some(Self::Pdf),
+            4 => Some(Self::Wav),
             _ => None,
         }
     }
@@ -113,37 +113,37 @@ pub struct Dataset {
 }
 
 impl Dataset {
-    pub fn load(path: &str, dev: &Device) -> Result<Self> {
+    pub fn collect(path: &str, dev: &Device) -> Result<Self> {
         let dir = std::fs::read_dir(path)?;
         let mut files = Vec::new();
-        for sub_dir in dir {
-            read_dir(&mut files, &sub_dir?)?;
-        }
         let mut table = BinaryTable::new();
-        let mut len = 0;
-        let mut inputs = Vec::new();
-        let mut outputs = Vec::new();
-        for (typ, path) in files {
-            let bytes = std::fs::read(path)?;
-            table.parse(&bytes);
-            let input = table.export();
-            inputs.extend(input);
-            outputs.extend_from_slice(typ.outputs());
-            table.clear();
-            len += 1;
+        for sub_dir in dir {
+            read_dir(&mut table, &mut files, &sub_dir?)?;
         }
+        files.shuffle();
+        let len = files.len();
         let train_len = (len as f32 * 0.8) as usize;
         let test_len = len - train_len;
         if train_len == 0 || test_len == 0 {
             return Err(Error::msg("Dataset to small"));
         }
-        let train_inputs =
-            Tensor::from_vec(inputs[0..train_len].to_vec(), (train_len, N_INPUT), dev)?;
-        let train_outputs =
-            Tensor::from_vec(outputs[0..train_len].to_vec(), (train_len, N_OUTPUT), dev)?;
-        let test_inputs = Tensor::from_vec(inputs[train_len..].to_vec(), (test_len, N_INPUT), dev)?;
-        let test_outputs =
-            Tensor::from_vec(outputs[train_len..].to_vec(), (test_len, N_OUTPUT), dev)?;
+        let mut train_inputs = Vec::new();
+        let mut train_outputs = Vec::new();
+        let mut test_inputs = Vec::new();
+        let mut test_outputs = Vec::new();
+        for (i, (typ, input)) in files.into_iter().enumerate() {
+            if i < train_len {
+                train_inputs.extend(input);
+                train_outputs.push(typ.output());
+            } else {
+                test_inputs.extend(input);
+                test_outputs.push(typ.output());
+            }
+        }
+        let train_inputs = Tensor::from_vec(train_inputs, (train_len, N_INPUT), dev)?;
+        let train_outputs = Tensor::from_vec(train_outputs, train_len, dev)?;
+        let test_inputs = Tensor::from_vec(test_inputs, (test_len, N_INPUT), dev)?;
+        let test_outputs = Tensor::from_vec(test_outputs, test_len, dev)?;
         Ok(Self {
             train_inputs,
             train_outputs,
@@ -153,44 +153,40 @@ impl Dataset {
     }
 }
 
-fn read_dir(files: &mut Vec<(FileType, PathBuf)>, entry: &DirEntry) -> Result<()> {
+fn read_dir(
+    table: &mut BinaryTable,
+    files: &mut Vec<(FileType, Vec<f32>)>,
+    entry: &DirEntry,
+) -> Result<()> {
     let metadata = entry.metadata()?;
     let path = entry.path();
     if metadata.is_dir() {
         let dir = std::fs::read_dir(path)?;
         for sub_dir in dir {
-            read_dir(files, &sub_dir?)?;
+            read_dir(table, files, &sub_dir?)?;
         }
         return Ok(());
     }
     let ext = path.extension().map(OsStr::as_bytes);
     let file_type = match ext {
-        Some(b"txt" | b"text") => FileType::Text,
+        Some(b"txt" | b"text" | b"TXT") => FileType::Text,
         None | Some(b"bin" | b"exe" | b"dll" | b"so" | b"a") => FileType::Binary,
-        Some(b"png") => FileType::Png,
-        Some(b"wav" | b"wave") => FileType::Wav,
-        Some(b"ogg") => FileType::Ogg,
+        Some(b"jpg" | b"jpeg") => FileType::Jpeg,
+        Some(b"pdf") => FileType::Pdf,
+        Some(b"wav") => FileType::Wav,
         _ => {
             eprintln!("warning: ignoring file with unknown extension {path:?}");
             return Ok(());
         }
     };
-    files.push((file_type, path));
+    let bytes = std::fs::read(path)?;
+    table.parse(&bytes);
+    let input = table.export();
+    table.clear();
+    files.push((file_type, input));
     Ok(())
 }
 
-/// Neural network with following sizes:
-/// - Input: `(256*256,)`
-/// - Output: `(5,)`
-/// - Hidden layer 1: `(512,)`
-/// - Hidden layer 2: `(256,)`
-///
-/// Different outputs:
-/// - 0: Text file
-/// - 1: Binaries (executable)
-/// - 2: Png
-/// - 3: Wav
-/// - 4: Ogg
 pub struct Network {
     pub ln1: Linear,
     pub ln2: Linear,
@@ -250,8 +246,8 @@ pub fn train(m: Dataset, dev: &Device) -> Result<Network> {
             .to_scalar::<f32>()?;
         let test_accuracy = sum_ok / test_outputs.dims1()? as f32;
         final_accuracy = 100.0 * test_accuracy;
-        println!(
-            "Epoch: {epoch:3} Train loss: {:8.5} Test accuracy: {:5.2}%",
+        eprintln!(
+            "info: Epoch: {epoch:3} Train loss: {:8.5} Test accuracy: {:5.2}%",
             loss.to_scalar::<f32>()?,
             final_accuracy
         );

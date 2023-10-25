@@ -1,6 +1,7 @@
-use std::env::args;
+use std::{env::args, process::exit};
 
-use binary_visualizer::BinaryTable;
+use binary_visualizer::{train, BinaryTable, Dataset};
+use candle::Device;
 use macroquad::{
     prelude::{Color, BLACK},
     shapes::draw_rectangle,
@@ -19,12 +20,47 @@ fn config() -> Conf {
     }
 }
 
-#[macroquad::main(config)]
-async fn main() {
+fn main() {
     // run().unwrap();
-    // if true {
-    //     return;
-    // }
+    eprintln!("info: Collecting dataset...");
+    let ds = match Dataset::collect("./files", &Device::Cpu) {
+        Ok(ds) => ds,
+        Err(err) => {
+            eprintln!("error: Could not collect dataset - {err}");
+            exit(1);
+        }
+    };
+    eprintln!(
+        "info: Dataset {{
+    train_inputs: {:?}
+    train_outputs: {:?}
+    test_inputs: {:?}
+    test_outputs: {:?}
+}}",
+        ds.train_inputs.shape(),
+        ds.train_outputs.shape(),
+        ds.test_inputs.shape(),
+        ds.test_outputs.shape(),
+    );
+    eprintln!("info: Start training...");
+    let _trained_model = loop {
+        match train(ds.clone(), &Device::Cpu) {
+            Ok(model) => {
+                break model;
+            }
+            Err(err) => {
+                eprintln!("error: {err}");
+            }
+        }
+    };
+    eprintln!("info: Model successully trained");
+    if true {
+        return;
+    }
+    macroquad::Window::from_config(config(), window());
+}
+
+async fn window() {
     let path = args().nth(1).expect("Input file");
     let bytes = std::fs::read(&path).expect("Read from input file");
     let mut table = BinaryTable::new();
