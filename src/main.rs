@@ -1,6 +1,9 @@
 use std::{env::args, process::exit};
 
-use binary_visualizer::{train, BinaryTable, Dataset};
+use binary_visualizer::{
+    ml::{train, Dataset},
+    table::BinaryTable,
+};
 use candle::Device;
 use macroquad::{
     prelude::{Color, BLACK},
