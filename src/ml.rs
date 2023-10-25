@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, fs::DirEntry};
+use std::fs::DirEntry;
 
 use anyhow::{Error, Result};
 use candle::{DType, Device, Module, Tensor, D};
@@ -114,13 +114,13 @@ fn read_dir(
         }
         return Ok(());
     }
-    let ext = path.extension().map(OsStr::as_encoded_bytes);
+    let ext = path.extension().map(|s| s.to_str().expect("Fuck Windows"));
     let file_type = match ext {
-        Some(b"txt" | b"text" | b"TXT") => FileType::Text,
-        None | Some(b"bin" | b"exe" | b"dll" | b"so" | b"a") => FileType::Binary,
-        Some(b"jpg" | b"jpeg") => FileType::Jpeg,
-        Some(b"pdf") => FileType::Pdf,
-        Some(b"wav") => FileType::Wav,
+        Some("txt" | "text" | "TXT") => FileType::Text,
+        None | Some("bin" | "exe" | "dll" | "so" | "a") => FileType::Binary,
+        Some("jpg" | "jpeg") => FileType::Jpeg,
+        Some("pdf") => FileType::Pdf,
+        Some("wav") => FileType::Wav,
         _ => {
             eprintln!("warning: ignoring file with unknown extension {path:?}");
             return Ok(());
