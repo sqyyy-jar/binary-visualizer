@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, fs::DirEntry, os::unix::prelude::OsStrExt};
+use std::{ffi::OsStr, fs::DirEntry};
 
 use anyhow::{Error, Result};
 use candle::{DType, Device, Module, Tensor, D};
@@ -114,7 +114,7 @@ fn read_dir(
         }
         return Ok(());
     }
-    let ext = path.extension().map(OsStr::as_bytes);
+    let ext = path.extension().map(OsStr::as_encoded_bytes);
     let file_type = match ext {
         Some(b"txt" | b"text" | b"TXT") => FileType::Text,
         None | Some(b"bin" | b"exe" | b"dll" | b"so" | b"a") => FileType::Binary,
