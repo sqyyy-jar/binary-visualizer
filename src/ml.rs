@@ -178,7 +178,7 @@ pub fn train(m: Dataset, dev: &Device) -> Result<Network> {
     for epoch in 1..=EPOCHS {
         let logits = model.forward(&train_inputs)?;
         let log_sm = ops::log_softmax(&logits, D::Minus1)?;
-        let loss = loss::nll(dbg!(&log_sm), dbg!(&train_outputs))?;
+        let loss = loss::nll(&log_sm, &train_outputs)?;
         sgd.backward_step(&loss)?;
         let test_logits = model.forward(&test_inputs)?;
         let sum_ok = test_logits
