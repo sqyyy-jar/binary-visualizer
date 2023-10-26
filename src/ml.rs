@@ -12,7 +12,7 @@ const N_HIDDEN_1: usize = 512;
 const N_OUTPUT: usize = 5;
 
 const EPOCHS: usize = 10;
-const LEARNING_RATE: f64 = 0.005;
+const LEARNING_RATE: f64 = 0.01;
 
 #[derive(Clone, Copy)]
 pub enum FileType {

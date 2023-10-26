@@ -39,7 +39,11 @@ impl BinaryTable {
         let mut tensor = vec![0f32; 256 * 256];
         for (y, row) in self.dots.iter().enumerate() {
             for (x, &value) in row.iter().enumerate() {
-                let t = (value as f32).ln() / self.max;
+                let t = if value == 0 {
+                    0.0
+                } else {
+                    (value as f32).ln() / self.max
+                };
                 tensor[y * 256 + x] = t;
             }
         }
