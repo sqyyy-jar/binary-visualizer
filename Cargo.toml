@@ -7,4 +7,7 @@ edition = "2021"
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 candle = { version = "0.3.0", package = "candle-core" }
 candle-nn = "0.3.0"
+clap = { version = "4.4.7", features = ["cargo"] }
+env_logger = "0.10.0"
+log = "0.4.20"
 macroquad = "0.4.4"

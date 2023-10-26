@@ -1,14 +1,18 @@
-use std::{env::args, process::exit};
+use std::{
+    path::{Path, PathBuf},
+    process::exit,
+};
 
 use binary_visualizer::{
-    ml::{train, Dataset},
+    ml::{train, Dataset, FileType, Network},
     table::BinaryTable,
 };
 use candle::Device;
+use clap::{arg, command, value_parser};
+use log::{error, info, LevelFilter};
 use macroquad::{
     prelude::{Color, BLACK},
     shapes::draw_rectangle,
-    texture::get_screen_data,
     window::{clear_background, next_frame, Conf},
 };
 
@@ -24,64 +28,146 @@ fn config() -> Conf {
 }
 
 fn main() {
-    // run().unwrap();
-    eprintln!("info: Collecting dataset...");
-    let ds = match Dataset::collect("./files", &Device::Cpu) {
-        Ok(ds) => ds,
-        Err(err) => {
-            eprintln!("error: Could not collect dataset - {err}");
-            exit(1);
-        }
-    };
-    eprintln!(
-        "info: Dataset {{
-    train_inputs: {:?}
-    train_outputs: {:?}
-    test_inputs: {:?}
-    test_outputs: {:?}
-}}",
-        ds.train_inputs.shape(),
-        ds.train_outputs.shape(),
-        ds.test_inputs.shape(),
-        ds.test_outputs.shape(),
-    );
-    eprintln!("info: Start training...");
-    let _trained_model = loop {
-        match train(ds.clone(), &Device::Cpu) {
-            Ok(model) => {
-                break model;
+    env_logger::builder()
+        .filter_level(LevelFilter::Info)
+        .format_timestamp(None)
+        .format_target(false)
+        .init();
+    let matches = command!()
+        .subcommands([
+            command!("train").alias("t").args([
+                arg!(<MODEL> "The file the model is stored in")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf)),
+                arg!(<DATA> "The directory of the dataset to train on")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf)),
+                arg!(--"accuracy" "The minimum required accuracy expressed in percent (default: 95.0)")
+                    .required(false)
+                    .value_parser(value_parser!(f32))
+                    .default_value("95.0"),
+            ]),
+            command!("predict").alias("p").args([
+                arg!(<MODEL> "The file the model is stored in")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf)),
+                arg!(<FILE> "The input file")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf))
+            ]),
+            command!("show")
+                .alias("s")
+                .args([arg!(<FILE> "The input file")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf))]),
+        ])
+        .subcommand_required(true)
+        .get_matches();
+    match matches.subcommand() {
+        Some(("train", args)) => {
+            let model = args.get_one::<PathBuf>("MODEL").unwrap();
+            let data = args.get_one::<PathBuf>("DATA").unwrap();
+            let &accuracy = args.get_one::<f32>("accuracy").unwrap();
+            if !data.exists() || !data.is_dir() {
+                error!("The dataset does not exist or is not a directory");
+                exit(1);
             }
-            Err(err) => {
-                eprintln!("error: {err}");
+            if accuracy < 1.0 {
+                error!("Minimum accuracy cannot be below 1%");
+                exit(1);
             }
+            info!("Collecting dataset...");
+            let ds = match Dataset::collect(data, &Device::Cpu) {
+                Ok(ds) => ds,
+                Err(err) => {
+                    error!("Could not collect dataset - {err}");
+                    exit(1);
+                }
+            };
+            info!("Start training...");
+            let _trained_model = loop {
+                match train(ds.clone(), model, &Device::Cpu) {
+                    Ok(model) => {
+                        break model;
+                    }
+                    Err(err) => {
+                        error!("{err}");
+                    }
+                }
+            };
+            info!("Model successully trained");
         }
-    };
-    eprintln!("info: Model successully trained");
-    if true {
-        return;
+        Some(("predict", args)) => {
+            let model = args.get_one::<PathBuf>("MODEL").unwrap();
+            let file = args.get_one::<PathBuf>("FILE").unwrap();
+            if !model.exists() || !model.is_file() {
+                error!("Model does not exist or is not a file");
+                exit(1);
+            }
+            if !file.exists() || !file.is_file() {
+                error!("Input does not exist or is not a file");
+                exit(1);
+            }
+            let dev = match Device::cuda_if_available(0) {
+                Ok(dev) => dev,
+                Err(err) => {
+                    error!("Could not create device: {err}");
+                    exit(1);
+                }
+            };
+            let model = match Network::load(model, &dev) {
+                Ok(model) => model,
+                Err(err) => {
+                    error!("Could not load model: {err}");
+                    exit(1);
+                }
+            };
+            let content = match std::fs::read(file) {
+                Ok(content) => content,
+                Err(err) => {
+                    error!("Could not read input file: {err}");
+                    exit(1);
+                }
+            };
+            let mut table = BinaryTable::new();
+            table.parse(&content);
+            let prediction = match model.predict(&table, &dev) {
+                Ok(prediction) => prediction,
+                Err(err) => {
+                    error!("Could not predict file type: {err}");
+                    exit(1);
+                }
+            };
+            let file_type = FileType::from_prediction(prediction);
+            info!("{prediction:?} - {file_type:?}");
+        }
+        Some(("show", args)) => {
+            let file = args.get_one::<PathBuf>("FILE").unwrap();
+            macroquad::Window::from_config(config(), window(file.clone()));
+        }
+        _ => unreachable!(),
     }
-    macroquad::Window::from_config(config(), window());
 }
 
-async fn window() {
-    let path = args().nth(1).expect("Input file");
+async fn window<P>(path: P)
+where
+    P: AsRef<Path>,
+{
     let bytes = std::fs::read(&path).expect("Read from input file");
     let mut table = BinaryTable::new();
     table.parse(&bytes);
-    draw(&table);
-    let scr = get_screen_data();
-    scr.export_png(&format!("{path}-out.png"));
+    let export = table.export();
     loop {
-        draw(&table);
+        draw(&export);
         next_frame().await
     }
 }
 
-fn draw(table: &BinaryTable) {
+fn draw(table: &[f32]) {
     clear_background(BLACK);
     for y in 0..256 {
         for x in 0..256 {
-            let t = (table.dots[y][x] as f32).ln() / table.max;
+            let t = table[y * 256 + x];
             draw_rectangle(
                 x as f32 * SCALEF,
                 y as f32 * SCALEF,
